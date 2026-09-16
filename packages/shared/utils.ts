@@ -16,11 +16,47 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { URL } from 'url';
 import mime from 'mime';
 import { combineHeadersForUrl, BundleBuilder } from 'wbn';
 import { IntegrityBlockSigner } from 'wbn-sign';
 import { checkAndAddIwaHeaders } from './iwa-headers.js';
 import { ValidIbSignPluginOptions, ValidPluginOptions } from './types.js';
+
+// Exchange URLs are built by string-concatenating `baseURL` with a path derived
+// from filesystem names or bundler chunk names. POSIX path components may
+// legally contain ':', so a crafted directory tree such as `https:/evil/x.js`
+// can turn the concatenated result into an absolute URL for a foreign origin.
+// Reject any exchange URL that does not stay on `baseURL`'s origin (or, when
+// `baseURL` is empty or relative, any exchange URL that parses as absolute at all).
+export function assertExchangeUrlOrigin(exchangeUrl: string, baseURL: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(exchangeUrl);
+  } catch {
+    return; // Not an absolute URL; nothing to check.
+  }
+
+  let baseParsed: URL;
+  try {
+    baseParsed = new URL(baseURL);
+  } catch {
+    // baseURL is not an absolute URL, so exchangeUrl should not be absolute either.
+    throw new Error(
+      `Refusing to add exchange with unexpected origin: ${exchangeUrl}`
+    );
+  }
+
+  if (
+    parsed.protocol !== baseParsed.protocol ||
+    parsed.host !== baseParsed.host ||
+    parsed.port !== baseParsed.port
+  ) {
+    throw new Error(
+      `Refusing to add exchange with unexpected origin: ${exchangeUrl}`
+    );
+  }
+}
 
 // If the file name is 'index.html', create an entry for both baseURL/dir/ and
 // baseURL/dir/index.html which redirects to the aforementioned. Otherwise just
@@ -49,6 +85,7 @@ export function addAsset(
     );
     if (shouldCheckIwaHeaders) checkAndAddIwaHeaders(combinedIndexHeaders);
 
+    assertExchangeUrlOrigin(baseURL + relativeAssetPath, baseURL);
     builder.addExchange(
       baseURL + relativeAssetPath,
       301,
@@ -69,6 +106,7 @@ export function addAsset(
   );
   if (shouldCheckIwaHeaders) checkAndAddIwaHeaders(combinedHeaders);
 
+  assertExchangeUrlOrigin(baseURLWithAssetPath, baseURL);
   builder.addExchange(
     baseURLWithAssetPath,
     200,
