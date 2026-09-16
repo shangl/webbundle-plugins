@@ -15,6 +15,8 @@
  */
 
 import test from 'ava';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as rollup from 'rollup';
 import crypto from 'crypto';
@@ -144,6 +146,71 @@ test('static', async (t) => {
   t.is(output[keys[0]].fileName, 'out.wbn');
 
   t.snapshot(parseWebBundle(output[keys[0]].source));
+});
+
+test('static with symbolic link throws error', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wbn-rollup-symlink-'));
+  try {
+    const targetFile = path.join(tmpDir, 'target.txt');
+    fs.writeFileSync(targetFile, 'sensitive data');
+    const symlinkFile = path.join(tmpDir, 'symlink.txt');
+    fs.symlinkSync(targetFile, symlinkFile);
+
+    const bundle = await rollup.rollup({
+      input: 'fixtures/index.js',
+      plugins: [
+        webbundle({
+          baseURL: 'https://wbn.example.com/',
+          output: 'out.wbn',
+          static: { dir: tmpDir },
+        }),
+      ],
+    });
+
+    const error = await t.throwsAsync(
+      async () => {
+        await bundle.generate({ format: 'esm' });
+      },
+      { instanceOf: Error }
+    );
+    t.is(
+      error.message,
+      `Refusing to bundle symbolic link at ${symlinkFile}. Replace it with a regular file or directory.`
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('static with directory-symlink loop throws refusal error without ELOOP', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wbn-rollup-loop-'));
+  try {
+    const loopLink = path.join(tmpDir, 'loop');
+    fs.symlinkSync('.', loopLink);
+
+    const bundle = await rollup.rollup({
+      input: 'fixtures/index.js',
+      plugins: [
+        webbundle({
+          output: 'out.wbn',
+          static: { dir: tmpDir },
+        }),
+      ],
+    });
+
+    const error = await t.throwsAsync(
+      async () => {
+        await bundle.generate({ format: 'esm' });
+      },
+      { instanceOf: Error }
+    );
+    t.is(
+      error.message,
+      `Refusing to bundle symbolic link at ${loopLink}. Replace it with a regular file or directory.`
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test('relative', async (t) => {
