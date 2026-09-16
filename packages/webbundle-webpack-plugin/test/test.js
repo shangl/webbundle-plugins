@@ -20,6 +20,7 @@ import webpack from 'webpack';
 import MemoryFS from 'memory-fs';
 import url from 'url';
 import fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as wbn from 'wbn';
 import * as wbnSign from 'wbn-sign';
@@ -99,6 +100,34 @@ test('static', async (t) => {
   ]);
   const resp = bundle.getResponse(primaryURL);
   t.is(new TextDecoder('utf-8').decode(resp.body), html.toString());
+});
+
+test('static with symbolic link throws error', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wbn-webpack-symlink-'));
+  try {
+    const targetFile = path.join(tmpDir, 'target.txt');
+    fs.writeFileSync(targetFile, 'sensitive data');
+    const symlinkFile = path.join(tmpDir, 'symlink.txt');
+    fs.symlinkSync(targetFile, symlinkFile);
+
+    const error = await t.throwsAsync(
+      async () => {
+        await run({
+          baseURL: 'https://example.com/',
+          static: { dir: tmpDir },
+          output: 'example.wbn',
+        });
+      },
+      { instanceOf: Error }
+    );
+    t.true(
+      error.message.includes(
+        `Refusing to bundle symbolic link at ${symlinkFile}. Replace it with a regular file or directory.`
+      )
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test('relative', async (t) => {

@@ -19,8 +19,8 @@ import * as path from 'path';
 import mime from 'mime';
 import { combineHeadersForUrl, BundleBuilder } from 'wbn';
 import { IntegrityBlockSigner } from 'wbn-sign';
-import { checkAndAddIwaHeaders } from './iwa-headers';
-import { ValidIbSignPluginOptions, ValidPluginOptions } from './types';
+import { checkAndAddIwaHeaders } from './iwa-headers.js';
+import { ValidIbSignPluginOptions, ValidPluginOptions } from './types.js';
 
 // If the file name is 'index.html', create an entry for both baseURL/dir/ and
 // baseURL/dir/index.html which redirects to the aforementioned. Otherwise just
@@ -84,13 +84,29 @@ export function addFilesRecursively(
   pluginOptions: ValidPluginOptions,
   recPath = ''
 ) {
+  if (recPath === '' && fs.lstatSync(dir).isSymbolicLink()) {
+    throw new Error(
+      `Refusing to bundle symbolic link at ${dir}. ` +
+        `Replace it with a regular file or directory.`
+    );
+  }
+
   const files = fs.readdirSync(dir);
   files.sort(); // Sort entries for reproducibility.
 
   for (const fileName of files) {
     const filePath = path.join(dir, fileName);
 
-    if (fs.statSync(filePath).isDirectory()) {
+    const stat = fs.lstatSync(filePath);
+    if (stat.isSymbolicLink()) {
+      // Refuse to follow symlinks so that files outside the static directory
+      // (credentials, SSH keys, etc.) cannot be pulled into the bundle.
+      throw new Error(
+        `Refusing to bundle symbolic link at ${filePath}. ` +
+          `Replace it with a regular file or directory.`
+      );
+    }
+    if (stat.isDirectory()) {
       addFilesRecursively(
         builder,
         baseURL,
