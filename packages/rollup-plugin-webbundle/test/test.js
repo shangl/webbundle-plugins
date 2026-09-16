@@ -15,7 +15,7 @@
  */
 
 import test from 'ava';
-import * as fs from 'fs';
+import fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as rollup from 'rollup';
@@ -182,11 +182,12 @@ test('static with symbolic link throws error', async (t) => {
   }
 });
 
-test('static with directory-symlink loop throws refusal error without ELOOP', async (t) => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wbn-rollup-loop-'));
+test('static with scheme-like directory refuses foreign origin', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wbn-rollup-foreign-'));
   try {
-    const loopLink = path.join(tmpDir, 'loop');
-    fs.symlinkSync('.', loopLink);
+    const foreignDir = path.join(tmpDir, 'https:', 'attacker.test');
+    fs.mkdirSync(foreignDir, { recursive: true });
+    fs.writeFileSync(path.join(foreignDir, 'p.js'), 'alert(1);');
 
     const bundle = await rollup.rollup({
       input: 'fixtures/index.js',
@@ -206,7 +207,7 @@ test('static with directory-symlink loop throws refusal error without ELOOP', as
     );
     t.is(
       error.message,
-      `Refusing to bundle symbolic link at ${loopLink}. Replace it with a regular file or directory.`
+      'Refusing to add exchange with unexpected origin: https:/attacker.test/p.js'
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

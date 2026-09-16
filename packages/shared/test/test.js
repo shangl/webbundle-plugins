@@ -20,7 +20,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { BundleBuilder } from 'wbn';
 import { getValidatedOptionsWithDefaults } from '../lib/types.js';
-import { addFilesRecursively } from '../lib/utils.js';
+import {
+  addAsset,
+  addFilesRecursively,
+  assertExchangeUrlOrigin,
+} from '../lib/utils.js';
 import * as wbnSign from 'wbn-sign';
 
 const TEST_ED25519_PRIVATE_KEY = wbnSign.parsePemKey(
@@ -143,4 +147,80 @@ test('addFilesRecursively - refuses root directory being a symbolic link', (t) =
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test('addAsset - refuses absolute exchange URL when baseURL is empty', (t) => {
+  const builder = new BundleBuilder();
+  const error = t.throws(
+    () => {
+      addAsset(
+        builder,
+        '',
+        'https:/attacker.test/p.js',
+        'console.log("evil");',
+        { output: 'out.wbn' }
+      );
+    },
+    { instanceOf: Error }
+  );
+  t.is(
+    error.message,
+    'Refusing to add exchange with unexpected origin: https:/attacker.test/p.js'
+  );
+});
+
+test('assertExchangeUrlOrigin - throws when origins differ', (t) => {
+  const errorHttps = t.throws(
+    () => {
+      assertExchangeUrlOrigin(
+        'https://attacker.test/p.js',
+        'https://example.com/'
+      );
+    },
+    { instanceOf: Error }
+  );
+  t.is(
+    errorHttps.message,
+    'Refusing to add exchange with unexpected origin: https://attacker.test/p.js'
+  );
+
+  const errorIwa = t.throws(
+    () => {
+      assertExchangeUrlOrigin(
+        'isolated-app://attacker/p.js',
+        'isolated-app://legit/'
+      );
+    },
+    { instanceOf: Error }
+  );
+  t.is(
+    errorIwa.message,
+    'Refusing to add exchange with unexpected origin: isolated-app://attacker/p.js'
+  );
+});
+
+test('addAsset - allows same origin exchange URL', (t) => {
+  const builder = new BundleBuilder();
+  t.notThrows(() => {
+    addAsset(
+      builder,
+      'https://example.com/',
+      'script.js',
+      'console.log("ok");',
+      { baseURL: 'https://example.com/', output: 'out.wbn' }
+    );
+  });
+});
+
+test('addAsset - allows relative exchange URL when baseURL is empty or relative', (t) => {
+  const builder = new BundleBuilder();
+  t.notThrows(() => {
+    addAsset(builder, '', 'script.js', 'console.log("ok");', {
+      output: 'out.wbn',
+    });
+    addAsset(builder, '/', 'script.js', 'console.log("ok");', {
+      baseURL: '/',
+      output: 'out.wbn',
+    });
+  });
 });

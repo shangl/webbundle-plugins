@@ -130,6 +130,32 @@ test('static with symbolic link throws error', async (t) => {
   }
 });
 
+test('static with scheme-like directory refuses foreign origin', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wbn-webpack-foreign-'));
+  try {
+    const foreignDir = path.join(tmpDir, 'https:', 'attacker.test');
+    fs.mkdirSync(foreignDir, { recursive: true });
+    fs.writeFileSync(path.join(foreignDir, 'p.js'), 'alert(1);');
+
+    const error = await t.throwsAsync(
+      async () => {
+        await run({
+          output: 'example.wbn',
+          static: { dir: tmpDir },
+        });
+      },
+      { instanceOf: Error }
+    );
+    t.true(
+      error.message.includes(
+        'Refusing to add exchange with unexpected origin: https:/attacker.test/p.js'
+      )
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('relative', async (t) => {
   const { memfs } = await run({
     static: { dir: path.join(__dirname, 'fixtures', 'static') },
